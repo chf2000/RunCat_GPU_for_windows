@@ -21,6 +21,7 @@ using System.Diagnostics;
 using System.Windows.Forms;
 using System.Resources;
 using System.ComponentModel;
+using System.Threading;
 
 namespace RunCat
 {
@@ -48,7 +49,13 @@ namespace RunCat
     {
         private const int CPU_TIMER_DEFAULT_INTERVAL = 3000;
         private const int ANIMATE_TIMER_DEFAULT_INTERVAL = 200;
-        private PerformanceCounter cpuUsage;
+        //private PerformanceCounter cpuUsage;
+        private List<PerformanceCounter> performance_counter_list;
+        private PerformanceCounterCategory category;
+        private string[] names;
+        private double gpu_usage_percentage = 1;
+        private Thread get_gpu_usage_thread;
+
         private ToolStripMenuItem runnerMenu;
         private ToolStripMenuItem themeMenu;
         private ToolStripMenuItem startupMenu;
@@ -58,8 +65,8 @@ namespace RunCat
         private string systemTheme = "";
         private string manualTheme = "";
         private Icon[] icons;
-        private Timer animateTimer = new Timer();
-        private Timer cpuTimer = new Timer();
+        private System.Windows.Forms.Timer animateTimer = new System.Windows.Forms.Timer();
+        private System.Windows.Forms.Timer cpuTimer = new System.Windows.Forms.Timer();
 
 
         public RunCatApplicationContext()
@@ -72,8 +79,23 @@ namespace RunCat
 
             SystemEvents.UserPreferenceChanged += new UserPreferenceChangedEventHandler(UserPreferenceChanged);
 
-            cpuUsage = new PerformanceCounter("Processor", "% Processor Time", "_Total");
-            _ = cpuUsage.NextValue(); // discards first return value
+            performance_counter_list = new List<PerformanceCounter>();
+            category = new PerformanceCounterCategory("GPU Engine");
+            names = category.GetInstanceNames();
+            foreach (var name in names)
+            {
+                var counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", name);
+                performance_counter_list.Add(counter);
+            }
+            //cpuUsage = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+
+            foreach (var counter in performance_counter_list)
+            {
+                _ = counter.NextValue();
+            }
+            //_ = cpuUsage.NextValue(); // discards first return value
+
+            get_gpu_usage_thread = new Thread(() => GetGPUPercentage());
 
             runnerMenu = new ToolStripMenuItem("Runner", null, new ToolStripMenuItem[]
             {
@@ -255,7 +277,11 @@ namespace RunCat
 
         private void Exit(object sender, EventArgs e)
         {
-            cpuUsage.Close();
+            foreach (var counter in performance_counter_list)
+            {
+                counter.Close();
+            }
+            //cpuUsage.Close();
             animateTimer.Stop();
             cpuTimer.Stop();
             notifyIcon.Visible = false;
@@ -277,11 +303,17 @@ namespace RunCat
 
         private void CPUTick()
         {
-            float s = cpuUsage.NextValue();
-            notifyIcon.Text = $"CPU: {s:f1}%";
-            s = ANIMATE_TIMER_DEFAULT_INTERVAL / (float)Math.Max(1.0f, Math.Min(20.0f, s / 5.0f));
+            if (get_gpu_usage_thread.IsAlive == false)
+            {
+                get_gpu_usage_thread = new Thread(() => GetGPUPercentage());
+                get_gpu_usage_thread.Start();
+            }
+            //float s = cpuUsage.NextValue();
+            notifyIcon.Text = $"GPU: {gpu_usage_percentage:f1}%";
+            //s = ANIMATE_TIMER_DEFAULT_INTERVAL / (float)Math.Max(1.0f, Math.Min(20.0f, s / 5.0f));
+            gpu_usage_percentage = ANIMATE_TIMER_DEFAULT_INTERVAL / (float)Math.Max(1.0f, Math.Min(20.0f, gpu_usage_percentage / 5.0f));
             animateTimer.Stop();
-            animateTimer.Interval = (int)s;
+            animateTimer.Interval = (int)gpu_usage_percentage;
             animateTimer.Start();
         }
 
@@ -301,6 +333,40 @@ namespace RunCat
         {
             System.Diagnostics.Process.Start("taskmgr.exe");
         }
+
+        public void GetGPUPercentage()
+        {
+            retry: double max = 0;
+            foreach (var counter in performance_counter_list)
+            {
+                if (category.InstanceExists(counter.InstanceName))
+                {
+                    max = Math.Max(max, counter.NextValue());
+                }
+                else
+                {
+                    //names = category.GetInstanceNames();
+                    //performance_counter_list.Clear();
+                    //foreach (var name in names)
+                    //{
+                    //    var new_counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", name);
+                    //    performance_counter_list.Add(new_counter);
+                    //}
+                    //foreach (var new_counter in performance_counter_list)
+                    //{
+                    //    _ = new_counter.NextValue();
+                    //}
+                    performance_counter_list.Remove(counter);
+                    goto retry;
+                }
+
+            }
+            gpu_usage_percentage = max;
+
+        }
+
+
+
 
     }
 }
