@@ -331,7 +331,14 @@ namespace RunCat
         
         private void HandleDoubleClick(object Sender, EventArgs e)
         {
-            System.Diagnostics.Process.Start("taskmgr.exe");
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "powershell",
+                UseShellExecute = false,
+                Arguments = " -c Start-Process taskmgr.exe",
+                CreateNoWindow = true,
+            };
+            Process.Start(startInfo);
         }
 
         public void GetGPUPercentage()
